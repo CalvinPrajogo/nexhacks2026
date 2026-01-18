@@ -84,11 +84,36 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     };
     setCapturedImages(prev => [...prev, capture]);
 
-    // will send to devscope HERE
-    //sendToDevscope(imageData, detectionData);
+    // Automatically extract facial features
+    extractFaceFeatures(imageData);
+    
     downloadImage(imageData, detectionData);
 
     return imageData;
+  };
+
+  const extractFaceFeatures = async (imageData) => {
+    try {
+      addLog('🔍 Extracting facial features...');
+      
+      const response = await fetch('http://localhost:5000/extract-features', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageData })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        addLog(`✅ Features extracted! Saved to: ${result.saved_to}`);
+        addLog(`   Total features: ${result.feature_count}`);
+      } else {
+        addLog(`❌ Feature extraction failed: ${result.error}`);
+      }
+    } catch (error) {
+      addLog(`⚠️ Server error: ${error.message}`);
+      addLog('   Make sure to run: python3 feature_server.py');
+    }
   };
 
   useEffect(() => {

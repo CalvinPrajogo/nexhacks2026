@@ -74,7 +74,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     ctx.drawImage(video, 0, 0);
     
     const imageData = canvas.toDataURL('image/jpeg', 0.9);
-    addLog(' Screenshot captured!');
+    addLog('📸 Screenshot captured!');
 
     const capture = {
       timestamp: new Date(),
@@ -84,7 +84,9 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     };
     setCapturedImages(prev => [...prev, capture]);
 
-    // Automatically extract facial features
+    addLog('🚀 Starting feature extraction pipeline...');
+    
+    // Automatically extract facial features and match
     extractFaceFeatures(imageData);
     
     downloadImage(imageData, detectionData);
@@ -105,14 +107,45 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       const result = await response.json();
       
       if (result.success) {
-        addLog(`Features extracted! Saved to: ${result.saved_to}`);
-        addLog(`   Total features: ${result.feature_count}`);
+        addLog(`✓ Features extracted! Total: ${result.feature_count}`);
+        
+        // Immediately match against database
+        await matchFace(result.features);
       } else {
-        addLog(`Feature extraction failed: ${result.error}`);
+        addLog(`✗ Feature extraction failed: ${result.error}`);
       }
     } catch (error) {
-      addLog(`Server error: ${error.message}`);
-      addLog('   Make sure to run: python3 feature_server.py');
+      addLog(`✗ Server error: ${error.message}`);
+      addLog('   Make sure to run: python3 test.py');
+    }
+  };
+
+  const matchFace = async (features) => {
+    try {
+      addLog('🎯 Matching face against database...');
+      
+      const response = await fetch('http://localhost:5001/match-face', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ features })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success && result.matched) {
+        addLog(`✓ MATCH FOUND: ${result.person_name}`);
+        addLog(`   Confidence: ${(result.confidence * 100).toFixed(1)}%`);
+        addLog(`   Distance: ${result.distance.toFixed(4)}`);
+        setResult(`Identified: ${result.person_name} (${(result.confidence * 100).toFixed(1)}% confidence)`);
+      } else if (result.success && !result.matched) {
+        addLog('✗ No match found in database');
+        setResult('Unknown person');
+      } else {
+        addLog(`✗ Matching failed: ${result.error}`);
+      }
+    } catch (error) {
+      addLog(`✗ Matching error: ${error.message}`);
+      addLog('   Make sure to run: python3 vision-app/src/face_matching_server.py');
     }
   };
 
@@ -123,48 +156,41 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
         apiUrl: "https://cluster1.overshoot.ai/api/v0.2",
         apiKey: "ovs_3ca60448b9246224e080edb3159132a7",
 
-        prompt: PERSON_OF_INTEREST_PROMPT,
+        prompt: SIMPLE_PROMPT, // Use simple prompt for faster processing
 
         outputSchema: {
             type: "object",
             properties: {
-                personDetected: { type: "boolean" },
-                isCentered: { type: "boolean" },
-                isStationary: { type: "boolean" },
-                isEngaged: { type: "boolean" },
-                visibilityQuality: { type: "string" },
-                personOfInterestFound: { type: "boolean" },
-                details: { type: "object" },
-                confidence: { type: "number" },
-                reasoning: { type: "string" }
+                personFound: { type: "boolean" },
+                description: { type: "string" }
             },
-            required: ["personOfInterestFound"]
+            required: ["personFound"]
         },
 
         source: { type: "camera", cameraFacing: "environment" },
 
-        pollingInterval: 1000, // Process frames every 1 second (1000ms)
+        pollingInterval: 1000, // Process frames every 1 second
 
         debug: true, // Enable SDK debug logging
 
         onResult: (result) => {
-            addLog("onResult callback fired!");
+            addLog("✓ onResult callback fired!");
             
             try {
                 const data = JSON.parse(result.result);
                 console.log('Parsed result:', data);
                 setResult(JSON.stringify(data, null, 2));
                 
-                // Check if person of interest is found
-                if (data.personOfInterestFound) {
+                // Simple check - if person found, capture immediately
+                if (data.personFound) {
                     consecutiveDetections.current++;
                     const count = consecutiveDetections.current;
-                    setStatus(`Person of interest detected ${count}/3 times`);
-                    addLog(`Detection ${count}/3 - Confidence: ${data.confidence}`);
+                    setStatus(`Person detected ${count}/3 times`);
+                    addLog(`✓ Detection ${count}/3`);
                     
                     // Require 3 consecutive detections to confirm
                     if (count >= 3) {
-                        addLog('PERSON OF INTEREST CONFIRMED!');
+                        addLog('✓ PERSON CONFIRMED! Capturing...');
                         setStatus('CONFIRMED! Capturing...');
                         const screenshot = captureScreenshot(data);
                         if (screenshot) {
@@ -181,7 +207,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                         addLog(`Detection chain broken (was at ${consecutiveDetections.current})`);
                     }
                     consecutiveDetections.current = 0;
-                    setStatus(`Scanning... ${data.reasoning || 'No person of interest'}`);
+                    setStatus(`Scanning... ${data.description || 'No person detected'}`);
                 }
             } catch (e) {
                 addLog(`Parse error: ${e.message}`);

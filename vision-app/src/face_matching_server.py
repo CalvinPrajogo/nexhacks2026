@@ -1,11 +1,11 @@
 """
-Face Matching Server using Wood Wide AI Embedding API
-=====================================================
+Face Matching Server using Wood Wide AI Embedding API (Official SDK)
+====================================================================
 
-This server uses Wood Wide AI's embedding model workflow:
-1. Train embedding model via POST /api/models/embedding/train
-2. Monitor training via GET /api/models/{model_id} until COMPLETE
-3. Generate embeddings via POST /api/models/embedding/{model_id}/infer
+This server uses Wood Wide AI's official Python SDK for embedding workflow:
+1. Train embedding model
+2. Monitor training status until COMPLETE
+3. Generate embeddings for face matching
 
 Then uses Euclidean distance to match input photos against database embeddings.
 """
@@ -15,6 +15,7 @@ from flask_cors import CORS
 import numpy as np
 import json
 import os
+from woodwide import WoodWide
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -22,20 +23,18 @@ import time
 from pathlib import Path
 from threading import Thread
 import pickle
-import urllib3
-
-# Disable SSL warnings for development
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 CORS(app)
 
 # Configuration
-WOODWIDE_API_BASE = "https://api.woodwide.ai"  # Wood Wide AI API base URL
-WOODWIDE_API_KEY = os.environ.get("WOODWIDE_API_KEY", "your-api-key-here")
+WOODWIDE_API_KEY = "sk_KaQdUNVc1ziZAL3CIQL9qu2iGPpBp4w6z51UqUPGmnI"
 DATABASE_DIR = "./face_database"  # Directory containing face feature JSON files
 EMBEDDINGS_CACHE_FILE = "./embeddings_cache.pkl"  # Cache for computed embeddings
 MATCH_THRESHOLD = 0.85  # Euclidean distance threshold for matching
+
+# Initialize Wood Wide client using official SDK
+woodwide_client = WoodWide(api_key=WOODWIDE_API_KEY)
 
 # In-memory stores
 face_database = {}  # Raw face features from JSON files
@@ -44,258 +43,261 @@ embedding_model_id = None  # Current trained model ID
 model_status = "NOT_TRAINED"  # PENDING, TRAINING, COMPLETE, FAILED
 
 
-class WoodWideEmbeddingClient:
+# Helper functions for SDK
+def upload_dataset_sdk(dataset: list, dataset_name: str) -> dict:
     """
-    Client for Wood Wide AI Embedding API
-    
-    Workflow:
-    1. Train embedding model via POST /api/models/embedding/train
-    2. Monitor training via GET /api/models/{model_id} until COMPLETE
-    3. Generate embeddings via POST /api/models/embedding/{model_id}/infer
+    Upload dataset to Wood Wide AI first (required before training)
+    Converts dataset to CSV and uploads
     """
-    
-    def __init__(self, api_base: str, api_key: str):
-        self.api_base = api_base.rstrip('/')
-        self.api_key = api_key
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        self.model_id = None
-        self.model_status = "NOT_TRAINED"
+    try:
+        import pandas as pd
+        import io
         
-        # Create session with retry logic and SSL configuration
-        self.session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504]
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        print(f"[WoodWide SDK] Preparing dataset: {dataset_name}", flush=True)
+        print(f"[WoodWide SDK] Dataset size: {len(dataset)} instances", flush=True)
+
+        # Convert dataset to DataFrame first
+        df = pd.DataFrame(dataset)
+
+        print(f"[WoodWide SDK] Original DataFrame shape: {df.shape}", flush=True)
+
+        # WORKAROUND: Reduce feature dimensionality from 1425 to 100
+        # Wood Wide AI's embedding model appears to have issues with 1425 columns
+        # Simply select the first 100 features as a simple dimensionality reduction
+        label_col = 'person_name'
+        feature_cols = [col for col in df.columns if col.startswith('feature_')]
+
+        # Keep only first 100 features
+        max_features = 100
+        selected_features = feature_cols[:max_features]
+
+        print(f"[WoodWide SDK] Reducing features: {len(feature_cols)} -> {len(selected_features)}", flush=True)
+
+        # Create reduced DataFrame
+        reduced_df = df[[label_col] + selected_features].copy()
+
+        df = reduced_df
+        print(f"[WoodWide SDK] Reduced DataFrame shape: {df.shape}", flush=True)
+
+        # Save to CSV as bytes
+        csv_buffer = io.BytesIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)  # Reset to beginning
         
-        # For SSL issues, we'll try without verification (development only)
-        self.verify_ssl = False
-    
-    def train_embedding_model(self, dataset: list, dataset_name: str = "face_features") -> dict:
-        """
-        Step 1: Train an embedding model
-        POST /api/models/embedding/train
-        
-        Args:
-            dataset: List of data instances (face features with metadata)
-            dataset_name: Name for the dataset
-            
-        Returns:
-            dict with model_id and status (initially PENDING)
-        """
-        endpoint = f"{self.api_base}/api/models/embedding/train"
-        
-        payload = {
-            "dataset_name": dataset_name,
-            "dataset": dataset,
-            "config": {
-                "description": "Face feature embeddings for person identification",
-                "embedding_dimensions": 128,  # Output embedding size
-                "training_epochs": 100
-            }
-        }
-        
-        print(f"[WoodWide] Training embedding model...")
-        print(f"[WoodWide] Endpoint: {endpoint}")
-        print(f"[WoodWide] Dataset size: {len(dataset)} instances")
-        
+        # Use the upload method with filename to indicate CSV format
+        print(f"[WoodWide SDK] Calling SDK upload method...", flush=True)
         try:
-            response = self.session.post(
-                endpoint,
-                headers=self.headers,
-                json=payload,
-                timeout=30,
-                verify=self.verify_ssl
+            dataset_result = woodwide_client.api.datasets.upload(
+                file=(f"{dataset_name}.csv", csv_buffer, "text/csv"),
+                name=dataset_name,
+                overwrite=True
             )
-            response.raise_for_status()
-            result = response.json()
-            
-            self.model_id = result.get("model_id")
-            self.model_status = result.get("status", "PENDING")
-            
-            print(f"[WoodWide] Model ID: {self.model_id}")
-            print(f"[WoodWide] Initial Status: {self.model_status}")
-            
-            return {
-                "success": True,
-                "model_id": self.model_id,
-                "status": self.model_status
-            }
-            
-        except requests.exceptions.RequestException as e:
-            print(f"[WoodWide] Training request failed: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def get_model_status(self, model_id: str = None) -> dict:
-        """
-        Step 2: Monitor training status
-        GET /api/models/{model_id}
-        
-        Args:
-            model_id: The model ID to check (uses stored ID if not provided)
-            
-        Returns:
-            dict with current status (PENDING, TRAINING, COMPLETE, FAILED)
-        """
-        model_id = model_id or self.model_id
-        if not model_id:
-            return {"success": False, "error": "No model ID available"}
-        
-        endpoint = f"{self.api_base}/api/models/{model_id}"
-        
-        try:
-            response = self.session.get(
-                endpoint,
-                headers=self.headers,
-                timeout=10,
-                verify=self.verify_ssl
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            self.model_status = result.get("status", "UNKNOWN")
-            
-            print(f"[WoodWide] Model {model_id} status: {self.model_status}")
-            
-            return {
-                "success": True,
-                "model_id": model_id,
-                "status": self.model_status,
-                "details": result
-            }
-            
-        except requests.exceptions.RequestException as e:
-            print(f"[WoodWide] Status check failed: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def wait_for_training(self, model_id: str = None, timeout: int = 300, poll_interval: int = 5) -> dict:
-        """
-        Wait for model training to complete
-        
-        Args:
-            model_id: The model ID to monitor
-            timeout: Maximum seconds to wait
-            poll_interval: Seconds between status checks
-            
-        Returns:
-            Final status dict
-        """
-        model_id = model_id or self.model_id
-        start_time = time.time()
-        
-        print(f"[WoodWide] Waiting for model {model_id} to complete training...")
-        
-        while time.time() - start_time < timeout:
-            status_result = self.get_model_status(model_id)
-            
-            if not status_result.get("success"):
-                return status_result
-            
-            status = status_result.get("status")
-            
-            if status == "COMPLETE":
-                print(f"[WoodWide] Training complete!")
-                return status_result
-            elif status == "FAILED":
-                print(f"[WoodWide] Training failed!")
-                return status_result
-            
-            print(f"[WoodWide] Status: {status}, waiting {poll_interval}s...")
-            time.sleep(poll_interval)
-        
+            print(f"[WoodWide SDK] Dataset uploaded successfully", flush=True)
+            print(f"[WoodWide SDK] Upload result: {dataset_result}", flush=True)
+        except Exception as upload_error:
+            print(f"[WoodWide SDK] Dataset SDK upload failed: {upload_error}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+        return {
+            "success": True,
+            "dataset_id": getattr(dataset_result, 'id', None) or dataset_name,
+            "dataset_name": dataset_name
+        }
+    except Exception as e:
+        print(f"[WoodWide SDK] Dataset upload function failed: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "success": False,
-            "error": f"Training timeout after {timeout} seconds",
-            "last_status": self.model_status
+            "error": str(e)
         }
-    
-    def infer_embeddings(self, model_id: str, instances: list, coerce_schema: bool = True) -> dict:
-        """
-        Step 3: Generate embeddings for data instances
-        POST /api/models/embedding/{model_id}/infer
-        
-        Args:
-            model_id: The trained model ID
-            instances: List of data instances to embed
-            coerce_schema: Whether to coerce schema (default True)
-            
-        Returns:
-            dict with embedding vectors for each instance
-        """
-        model_id = model_id or self.model_id
-        if not model_id:
-            return {"success": False, "error": "No model ID available"}
-        
-        endpoint = f"{self.api_base}/api/models/embedding/{model_id}/infer"
-        
-        payload = {
-            "instances": instances,
-            "coerce_schema": coerce_schema
+
+
+def train_embedding_model_sdk(dataset_name: str, model_name: str = "face_embeddings") -> dict:
+    """
+    Train embedding model using Wood Wide SDK
+    Note: dataset_name is passed as query parameter
+    """
+    try:
+        import httpx
+
+        print(f"[WoodWide SDK] Training model: {model_name}", flush=True)
+        print(f"[WoodWide SDK] Using dataset: {dataset_name}", flush=True)
+
+        # Use httpx directly with simple form data (no input_columns)
+        headers = {
+            "Authorization": f"Bearer {WOODWIDE_API_KEY}",
+            "Content-Type": "application/x-www-form-urlencoded"
         }
-        
-        print(f"[WoodWide] Generating embeddings for {len(instances)} instances...")
-        
-        try:
-            response = self.session.post(
-                endpoint,
-                headers=self.headers,
-                json=payload,
-                timeout=60,
-                verify=self.verify_ssl
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            embeddings = result.get("embeddings", [])
-            print(f"[WoodWide] Generated {len(embeddings)} embeddings")
-            
-            return {
-                "success": True,
-                "embeddings": embeddings,
-                "model_id": model_id
-            }
-            
-        except requests.exceptions.RequestException as e:
-            print(f"[WoodWide] Inference failed: {e}")
+
+        # Simple form data without input_columns
+        form_data = {
+            "model_name": model_name,
+            "label_column": "person_name",
+            "overwrite": "true"
+        }
+
+        print(f"[WoodWide SDK] Starting training (auto-detect columns)...", flush=True)
+
+        response = httpx.post(
+            f"https://beta.woodwide.ai/api/models/embedding/train?dataset_name={dataset_name}",
+            headers=headers,
+            data=form_data,
+            timeout=30.0
+        )
+
+        print(f"[WoodWide SDK] Response status: {response.status_code}", flush=True)
+        print(f"[WoodWide SDK] Response body: {response.text}", flush=True)
+
+        if response.status_code != 200:
+            print(f"[WoodWide SDK] ERROR - Training failed with status {response.status_code}", flush=True)
             return {
                 "success": False,
-                "error": str(e)
+                "error": f"Training API returned {response.status_code}: {response.text}"
             }
+
+        response.raise_for_status()
+        model_public = response.json()
+
+        print(f"[WoodWide SDK] Training initiated successfully", flush=True)
+        print(f"[WoodWide SDK] Model ID: {model_public['id']}", flush=True)
+        print(f"[WoodWide SDK] Training Status: {model_public['training_status']}", flush=True)
+
+        return {
+            "success": True,
+            "model_id": model_public['id'],
+            "status": model_public['training_status']
+        }
+    except Exception as e:
+        print(f"[WoodWide SDK] Training failed: {e}")
+        # Try to show more debug info
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def get_model_status_sdk(model_id: str) -> dict:
+    """
+    Get model status using httpx directly
+    """
+    try:
+        import httpx
+
+        headers = {
+            "Authorization": f"Bearer {WOODWIDE_API_KEY}"
+        }
+
+        response = httpx.get(
+            f"https://beta.woodwide.ai/api/models/{model_id}",
+            headers=headers,
+            timeout=30.0
+        )
+
+        response.raise_for_status()
+        model = response.json()
+
+        return {
+            "success": True,
+            "model_id": model['id'],
+            "status": model['training_status'],
+            "details": model
+        }
+    except Exception as e:
+        print(f"[WoodWide SDK] Status check failed: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def wait_for_training_sdk(model_id: str, timeout: int = 300, poll_interval: int = 5) -> dict:
+    """
+    Wait for model training to complete using SDK
+    """
+    start_time = time.time()
+    print(f"[WoodWide SDK] Waiting for model {model_id} to complete training...")
     
-    def infer_single(self, model_id: str, instance: dict) -> np.ndarray:
-        """
-        Generate embedding for a single instance
+    while time.time() - start_time < timeout:
+        status_result = get_model_status_sdk(model_id)
         
-        Args:
-            model_id: The trained model ID
-            instance: Single data instance
-            
-        Returns:
-            numpy array of embedding vector, or None on failure
-        """
-        result = self.infer_embeddings(model_id, [instance])
+        if not status_result.get("success"):
+            return status_result
         
-        if result.get("success") and result.get("embeddings"):
-            return np.array(result["embeddings"][0])
+        status = status_result.get("status")
         
-        return None
+        if status == "COMPLETE":
+            print(f"[WoodWide SDK] Training complete!")
+            return status_result
+        elif status == "FAILED":
+            print(f"[WoodWide SDK] Training failed!")
+            return status_result
+        
+        print(f"[WoodWide SDK] Status: {status}, waiting {poll_interval}s...")
+        time.sleep(poll_interval)
+    
+    return {
+        "success": False,
+        "error": f"Training timeout after {timeout} seconds"
+    }
 
 
-# Initialize Wood Wide AI client
-woodwide_client = WoodWideEmbeddingClient(WOODWIDE_API_BASE, WOODWIDE_API_KEY)
+def infer_embeddings_sdk(model_id: str, dataset_name: str) -> dict:
+    """
+    Generate embeddings using Wood Wide API
+    Per API docs: POST /api/models/embedding/{model_id}/infer?dataset_name={dataset_name}
+    """
+    try:
+        import httpx
+
+        print(f"[WoodWide SDK] Generating embeddings for dataset: {dataset_name}")
+        print(f"[WoodWide SDK] Using model: {model_id}")
+
+        headers = {
+            "Authorization": f"Bearer {WOODWIDE_API_KEY}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+
+        # Per API docs, coerce_schema defaults to true
+        form_data = {
+            "coerce_schema": "true"
+        }
+
+        response = httpx.post(
+            f"https://beta.woodwide.ai/api/models/embedding/{model_id}/infer?dataset_name={dataset_name}",
+            headers=headers,
+            data=form_data,
+            timeout=60.0
+        )
+
+        print(f"[WoodWide SDK] Inference response status: {response.status_code}")
+
+        if response.status_code != 200:
+            print(f"[WoodWide SDK] ERROR - Inference failed with status {response.status_code}")
+            print(f"[WoodWide SDK] ERROR - Response: {response.text}")
+
+        response.raise_for_status()
+        result = response.json()
+
+        print(f"[WoodWide SDK] Generated embeddings successfully")
+
+        return {
+            "success": True,
+            "embeddings": result.get("embeddings", result),
+            "model_id": model_id
+        }
+    except Exception as e:
+        print(f"[WoodWide SDK] Inference failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 def euclidean_distance(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -438,19 +440,39 @@ def find_matching_person_woodwide(input_features: list, threshold: float = MATCH
     Find matching person using Wood Wide AI embeddings + Euclidean distance
     """
     global embedding_model_id, face_embeddings
-    
+
     if not face_embeddings:
         return {"success": False, "error": "No Wood Wide embeddings available. Train model first.", "matched": False}
-    
+
     if not embedding_model_id:
         return {"success": False, "error": "No trained model available", "matched": False}
-    
-    # Get embedding for input features using Wood Wide AI
-    input_instance = {"features": input_features}
-    input_embedding = woodwide_client.infer_single(embedding_model_id, input_instance)
-    
-    if input_embedding is None:
-        print("[WoodWide] Failed to get embedding for input, falling back to local")
+
+    # Upload input features as a temporary dataset for inference
+    input_dataset_name = f"input_face_inference_{int(time.time())}"
+    input_dataset = []
+
+    # Create dataset with same structure as training data
+    row = {"person_name": "input_face"}
+    for i, feat_val in enumerate(input_features):
+        row[f"feature_{i}"] = feat_val
+    input_dataset.append(row)
+
+    try:
+        # Upload the input dataset
+        upload_result = upload_dataset_sdk(input_dataset, input_dataset_name)
+        if not upload_result.get("success"):
+            print("[WoodWide] Failed to upload input dataset, falling back to local")
+            return find_matching_person_local(input_features, threshold)
+
+        # Generate embedding for the input
+        result = infer_embeddings_sdk(embedding_model_id, input_dataset_name)
+        if result.get("success") and result.get("embeddings"):
+            input_embedding = np.array(result["embeddings"][0])
+        else:
+            print("[WoodWide] Failed to get embedding for input, falling back to local")
+            return find_matching_person_local(input_features, threshold)
+    except Exception as e:
+        print(f"[WoodWide] Inference error: {e}, falling back to local")
         return find_matching_person_local(input_features, threshold)
     
     # Compare against all database embeddings using Euclidean distance
@@ -562,7 +584,8 @@ def train_embeddings():
     """
     Train Wood Wide AI embedding model on the face database
     
-    Step 1: POST /api/models/embedding/train
+    Step 1: Upload dataset
+    Step 2: Train model using dataset_name
     Returns model_id with PENDING status
     """
     global embedding_model_id, model_status
@@ -571,16 +594,28 @@ def train_embeddings():
         return jsonify({"success": False, "error": "Face database is empty"}), 400
     
     # Prepare dataset for Wood Wide AI
+    # Flatten features into separate columns (feature_0, feature_1, ...)
     dataset = []
     for name, data in face_database.items():
-        dataset.append({
-            "person_name": name,
-            "features": data['features'].tolist(),
-            "image_path": data.get('image_path', '')
-        })
+        row = {"person_name": name}
+        features = data['features'].tolist()
+        # Add each feature as a separate column
+        for i, feat_val in enumerate(features):
+            row[f"feature_{i}"] = feat_val
+        dataset.append(row)
     
-    # Train embedding model
-    result = woodwide_client.train_embedding_model(dataset, "face_embeddings")
+    dataset_name = "face_embeddings_dataset"
+    
+    # Step 1: Upload dataset
+    upload_result = upload_dataset_sdk(dataset, dataset_name)
+    if not upload_result.get("success"):
+        return jsonify({
+            "success": False,
+            "error": f"Dataset upload failed: {upload_result.get('error')}"
+        }), 500
+    
+    # Step 2: Train embedding model using dataset_name
+    result = train_embedding_model_sdk(dataset_name, "face_embeddings")
     
     if result.get("success"):
         embedding_model_id = result.get("model_id")
@@ -617,7 +652,7 @@ def get_model_status():
             "status": "NOT_TRAINED"
         })
     
-    result = woodwide_client.get_model_status(embedding_model_id)
+    result = get_model_status_sdk(embedding_model_id)
     
     if result.get("success"):
         model_status = result.get("status")
@@ -641,7 +676,7 @@ def wait_for_training():
     
     timeout = request.json.get('timeout', 300) if request.json else 300
     
-    result = woodwide_client.wait_for_training(embedding_model_id, timeout=timeout)
+    result = wait_for_training_sdk(embedding_model_id, timeout=timeout)
     
     if result.get("success"):
         model_status = result.get("status")
@@ -668,31 +703,28 @@ def generate_embeddings():
             "hint": "Wait for training to complete or call /wait-for-training"
         }), 400
     
-    # Prepare instances for inference
-    instances = []
-    names = []
-    for name, data in face_database.items():
-        instances.append({
-            "person_name": name,
-            "features": data['features'].tolist()
-        })
-        names.append(name)
-    
+    # Use the same dataset that was used for training
+    dataset_name = "face_embeddings_dataset"
+
     # Generate embeddings via Wood Wide AI
-    result = woodwide_client.infer_embeddings(embedding_model_id, instances)
-    
+    # The API will use the dataset we uploaded during training
+    result = infer_embeddings_sdk(embedding_model_id, dataset_name)
+
     if result.get("success"):
         embeddings = result.get("embeddings", [])
-        
-        # Store embeddings
+
+        # Store embeddings - map them back to person names
+        # The embeddings should be in the same order as the dataset
         face_embeddings = {}
+        names = list(face_database.keys())
+
         for i, name in enumerate(names):
             if i < len(embeddings):
                 face_embeddings[name] = np.array(embeddings[i])
-        
+
         # Save to cache
         save_embeddings_cache()
-        
+
         return jsonify({
             "success": True,
             "embeddings_generated": len(face_embeddings),
@@ -709,98 +741,29 @@ def generate_embeddings():
 @app.route('/full-pipeline', methods=['POST'])
 def full_pipeline():
     """
-    Run the complete Wood Wide AI pipeline:
-    1. Train embedding model
-    2. Wait for training to complete
-    3. Generate embeddings for all faces
+    Run the complete pipeline using Euclidean distance on feature space
+    (Wood Wide embedding code preserved but not used due to insufficient training data)
     """
-    global embedding_model_id, model_status, face_embeddings
+    global model_status
     
     if not face_database:
         return jsonify({"success": False, "error": "Face database is empty"}), 400
     
-    # Step 1: Train
+    # Skip Wood Wide embedding training - use direct feature comparison instead
     print("\n" + "="*50)
-    print("STEP 1: Training embedding model...")
+    print("PIPELINE: Using Euclidean distance on feature space")
     print("="*50)
+    print(f"Database loaded with {len(face_database)} faces")
+    print("Ready for matching using local feature comparison")
     
-    dataset = []
-    for name, data in face_database.items():
-        dataset.append({
-            "person_name": name,
-            "features": data['features'].tolist()
-        })
-    
-    train_result = woodwide_client.train_embedding_model(dataset)
-    
-    if not train_result.get("success"):
-        return jsonify({
-            "success": False,
-            "step": "train",
-            "error": train_result.get("error")
-        }), 500
-    
-    embedding_model_id = train_result.get("model_id")
-    
-    # Step 2: Wait for training
-    print("\n" + "="*50)
-    print("STEP 2: Waiting for training to complete...")
-    print("="*50)
-    
-    timeout = request.json.get('timeout', 300) if request.json else 300
-    wait_result = woodwide_client.wait_for_training(embedding_model_id, timeout=timeout)
-    
-    if not wait_result.get("success") or wait_result.get("status") != "COMPLETE":
-        return jsonify({
-            "success": False,
-            "step": "wait",
-            "error": wait_result.get("error", "Training did not complete"),
-            "status": wait_result.get("status")
-        }), 500
-    
-    model_status = "COMPLETE"
-    
-    # Step 3: Generate embeddings
-    print("\n" + "="*50)
-    print("STEP 3: Generating embeddings...")
-    print("="*50)
-    
-    instances = []
-    names = []
-    for name, data in face_database.items():
-        instances.append({
-            "person_name": name,
-            "features": data['features'].tolist()
-        })
-        names.append(name)
-    
-    infer_result = woodwide_client.infer_embeddings(embedding_model_id, instances)
-    
-    if not infer_result.get("success"):
-        return jsonify({
-            "success": False,
-            "step": "infer",
-            "error": infer_result.get("error")
-        }), 500
-    
-    embeddings = infer_result.get("embeddings", [])
-    face_embeddings = {}
-    for i, name in enumerate(names):
-        if i < len(embeddings):
-            face_embeddings[name] = np.array(embeddings[i])
-    
-    save_embeddings_cache()
-    
-    print("\n" + "="*50)
-    print("PIPELINE COMPLETE!")
-    print("="*50)
+    model_status = "READY_FOR_EUCLIDEAN_MATCHING"
     
     return jsonify({
         "success": True,
-        "model_id": embedding_model_id,
-        "embeddings_generated": len(face_embeddings),
-        "names": list(face_embeddings.keys()),
-        "message": "Full pipeline completed successfully!"
+        "method": "euclidean_distance",
+        "faces_loaded": len(face_database),
+        "names": list(face_database.keys()),
+        "message": "Pipeline ready - using Euclidean distance matching on raw features"
     })
 
 
@@ -910,4 +873,5 @@ if __name__ == '__main__':
     print("  GET  /database-stats      - Get database statistics")
     print("="*70 + "\n")
     
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # Run without debug to see print statements
+    app.run(host='0.0.0.0', port=5001, debug=False)

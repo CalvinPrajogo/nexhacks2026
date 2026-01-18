@@ -103,36 +103,36 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
             
             try {
                 const data = JSON.parse(result.result);
-                console.log('📊 Parsed result:', data);
+                console.log('Parsed result:', data);
                 setResult(JSON.stringify(data, null, 2));
                 
                 // Check if person of interest is found
                 if (data.personOfInterestFound) {
                     consecutiveDetections.current++;
                     const count = consecutiveDetections.current;
-                    setStatus(`✅ Person of interest detected ${count}/3 times`);
-                    addLog(`✅ Detection ${count}/3 - Confidence: ${data.confidence}`);
+                    setStatus(`Person of interest detected ${count}/3 times`);
+                    addLog(`Detection ${count}/3 - Confidence: ${data.confidence}`);
                     
                     // Require 3 consecutive detections to confirm
                     if (count >= 3) {
-                        addLog('🎯 PERSON OF INTEREST CONFIRMED!');
-                        setStatus('🎯 CONFIRMED! Capturing...');
+                        addLog('PERSON OF INTEREST CONFIRMED!');
+                        setStatus('CONFIRMED! Capturing...');
                         const screenshot = captureScreenshot();
                         if (screenshot) {
-                            addLog('📸 Screenshot saved!');
+                            addLog('Screenshot saved!');
                         }
                         consecutiveDetections.current = 0;
                     }
                 } else {
                     // Reset counter if no person detected
                     if (consecutiveDetections.current > 0) {
-                        addLog(`❌ Detection chain broken (was at ${consecutiveDetections.current})`);
+                        addLog(`Detection chain broken (was at ${consecutiveDetections.current})`);
                     }
                     consecutiveDetections.current = 0;
-                    setStatus(`🔍 Scanning... ${data.reasoning || 'No person of interest'}`);
+                    setStatus(`Scanning... ${data.reasoning || 'No person of interest'}`);
                 }
             } catch (e) {
-                addLog(`❌ Parse error: ${e.message}`);
+                addLog(`Parse error: ${e.message}`);
                 console.error('Parse error:', e, 'Raw:', result.result);
                 setResult(result.result);
             }
@@ -152,20 +152,20 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     vision.start()
       .then(() => {
         addLog(' vision.start() succeeded');
-        setStatus('🎥 Camera active, waiting for results...');
+        setStatus('Camera active, waiting for results...');
         
         // Log internal state
-        console.log('🔍 Vision instance:', visionRef.current);
+        console.log('Vision instance:', visionRef.current);
         
         if (videoRef.current) {
           const stream = vision.getMediaStream();
-          addLog(`📹 Got MediaStream: ${stream ? 'YES' : 'NO'}`);
+          addLog(`Got MediaStream: ${stream ? 'YES' : 'NO'}`);
           videoRef.current.srcObject = stream;
         }
         
         // Give it time to process
         setTimeout(() => {
-          addLog('⏰ 10 seconds elapsed - still waiting for results...');
+          addLog('10 seconds elapsed - still waiting for results...');
         }, 10000);
       })
       .catch(err => {

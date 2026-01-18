@@ -1,10 +1,152 @@
-body {
+* {
   margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #0f1929 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  color: #e0e0e0;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Broken glass background effect */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(45deg, transparent 48%, rgba(0, 212, 255, 0.3) 49%, rgba(0, 212, 255, 0.3) 51%, transparent 52%),
+    linear-gradient(-45deg, transparent 48%, rgba(0, 150, 255, 0.25) 49%, rgba(0, 150, 255, 0.25) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 15%, rgba(0, 212, 255, 0.2) 15.5%, rgba(0, 212, 255, 0.2) 16%, transparent 16.5%),
+    linear-gradient(0deg, transparent 35%, rgba(0, 150, 255, 0.2) 35.5%, rgba(0, 150, 255, 0.2) 36%, transparent 36.5%),
+    linear-gradient(60deg, transparent 40%, rgba(0, 200, 255, 0.15) 41%, rgba(0, 200, 255, 0.15) 59%, transparent 60%),
+    linear-gradient(120deg, transparent 30%, rgba(0, 180, 255, 0.15) 31%, rgba(0, 180, 255, 0.15) 69%, transparent 70%),
+    radial-gradient(circle at 20% 50%, rgba(0, 212, 255, 0.25) 0%, transparent 60%),
+    radial-gradient(circle at 80% 80%, rgba(0, 150, 255, 0.2) 0%, transparent 60%);
+  background-size: 
+    300px 300px,
+    300px 300px,
+    150px 100%,
+    100% 150px,
+    400px 400px,
+    500px 500px,
+    auto,
+    auto;
+  background-position: 
+    0 0,
+    40px 40px,
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0;
+  pointer-events: none;
+  z-index: 0;
+  animation: glassShift 25s ease-in-out infinite;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(0, 212, 255, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 90% 10%, rgba(0, 150, 255, 0.12) 0%, transparent 40%),
+    radial-gradient(circle at 50% 80%, rgba(0, 212, 255, 0.1) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-header {
+  text-align: center;
+  margin-bottom: 3rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+
+.company-title {
+  font-size: 3.5rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #00e5ff 0%, #00bcd4 50%, #0097a7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -2px;
+  margin: 0;
+  text-transform: uppercase;
+  position: relative;
+  filter: drop-shadow(0 0 30px rgba(0, 212, 255, 0.3));
+}
+
+.company-subtitle {
+  font-size: 1rem;
+  color: rgba(224, 224, 224, 0.6);
+  margin-top: 0.5rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+
+.debug-log {
+  background: rgba(15, 25, 45, 0.4);
+  border: 1.5px solid rgba(0, 212, 255, 0.4);
+  border-radius: 16px;
+  padding: 1.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.2),
+    0 0 40px rgba(0, 212, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+  position: relative;
+  text-align: center;
+}
+
+@keyframes glassShift {
+  0%, 100% {
+    background-position: 0 0, 50px 50px, 0 0, 0 0, 0 0, 0 0;
+  }
+  50% {
+    background-position: 10px 10px, 60px 60px, 5px 0, 0 5px, 0 0, 0 0;
+  }
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 code {

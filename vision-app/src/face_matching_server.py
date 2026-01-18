@@ -16,10 +16,16 @@ import numpy as np
 import json
 import os
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import time
 from pathlib import Path
 from threading import Thread
 import pickle
+import urllib3
+
+# Disable SSL warnings for development
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 CORS(app)
@@ -57,6 +63,20 @@ class WoodWideEmbeddingClient:
         }
         self.model_id = None
         self.model_status = "NOT_TRAINED"
+        
+        # Create session with retry logic and SSL configuration
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # For SSL issues, we'll try without verification (development only)
+        self.verify_ssl = False
     
     def train_embedding_model(self, dataset: list, dataset_name: str = "face_features") -> dict:
         """
@@ -87,11 +107,12 @@ class WoodWideEmbeddingClient:
         print(f"[WoodWide] Dataset size: {len(dataset)} instances")
         
         try:
-            response = requests.post(
+            response = self.session.post(
                 endpoint,
                 headers=self.headers,
                 json=payload,
-                timeout=30
+                timeout=30,
+                verify=self.verify_ssl
             )
             response.raise_for_status()
             result = response.json()
@@ -133,10 +154,11 @@ class WoodWideEmbeddingClient:
         endpoint = f"{self.api_base}/api/models/{model_id}"
         
         try:
-            response = requests.get(
+            response = self.session.get(
                 endpoint,
                 headers=self.headers,
-                timeout=10
+                timeout=10,
+                verify=self.verify_ssl
             )
             response.raise_for_status()
             result = response.json()
@@ -227,11 +249,12 @@ class WoodWideEmbeddingClient:
         print(f"[WoodWide] Generating embeddings for {len(instances)} instances...")
         
         try:
-            response = requests.post(
+            response = self.session.post(
                 endpoint,
                 headers=self.headers,
                 json=payload,
-                timeout=60
+                timeout=60,
+                verify=self.verify_ssl
             )
             response.raise_for_status()
             result = response.json()

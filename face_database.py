@@ -9,7 +9,8 @@ def create_database():
     """Create SQLite database with face features table"""
     conn = sqlite3.connect('face_database.db')
     cursor = conn.cursor()
-    468 face landmark features (x, y, z for each landmark)
+    
+    # Create table with id, name, and 468 face landmark features (x, y, z for each landmark)
     # Plus additional computed features
     landmark_columns = []
     for i in range(468):

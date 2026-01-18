@@ -40,11 +40,10 @@ def create_database():
             face_orientation_pitch REAL,
             face_orientation_roll REAL,
             eye_distance REAL,
-            face_aspect_ratio
-            bottom_lip_x REAL, bottom_lip_y REAL
+            face_aspect_ratio REAL
         )
     ''')
-
+    
     conn.commit()
     conn.close()
     print("Database created successfully!")
@@ -54,14 +53,30 @@ def extract_and_store_faces(image_dir='face_data/images'):
     conn = sqlite3.connect('face_database.db')
     cursor = conn.cursor()
     
-    # Initialize MediaPipe Face Mesh
-    mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
+    # Initialize MediaPipe Face Landmarker
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+    
+    # Check if model file exists, if not, download it
+    import urllib.request
+    model_path = 'face_landmarker.task'
+    if not os.path.exists(model_path):
+        print("Downloading face detection model...")
+        model_url = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+        urllib.request.urlretrieve(model_url, model_path)
+        print("Model downloaded successfully!")
+    
+    # Create Face Landmarker
+    base_options = python.BaseOptions(model_asset_path=model_path)
+    options = vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        num_faces=1,
+        min_face_detection_confidence=0.5,
+        min_face_presence_confidence=0.5,
+        min_tracking_confidence=0.5
     )
+    
+    detector = vision.FaceLandmarker.create_from_options(options)
     
     # Get all PNG files from the images directory
     image_files = [f for f in os.listdir(image_dir) if f.lower().endswith('.png')]
@@ -78,32 +93,44 @@ def extract_and_store_faces(image_dir='face_data/images'):
         image_path = os.path.join(image_dir, image_file)
         print(f"\nProcessing: {image_file}")
         
-        # Load the image
-        image = cv2.imread(image_path)
-        if image is None:
-            print(f"  ⚠️  Could not load {image_file}")
+        # Load the image using PIL first (handles more formats including HEIF)
+        try:
+            pil_image = Image.open(image_path)
+            # Convert to RGB if needed
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+            # Convert PIL image to numpy array for OpenCV
+            image_rgb = np.array(pil_image)
+        except Exception as e:
+            print(f"  ⚠️  Could not load {image_file}: {e}")
             continue
-            
-        # Convert BGR to RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        height, width = image.shape[:2]
+        
+        height, width = image_rgb.shape[:2]
+        
+        # Convert to MediaPipe Image format
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
         
         # Process the image
-        results = face_mesh.process(image_rgb)
+        results = detector.detect(mp_image)
         
-        if not results.multi_face_landmarks:
+        if not results.face_landmarks:
             print(f"  ⚠️  No face detected in {image_file}")
             continue
         
         # Get the first face
-        face_landmarks = results.multi_face_landmarks[0]
+        face_landmarks = results.face_landmarks[0]
+        
+        # MediaPipe Face Landmarker returns 478 landmarks, but we only use first 468
+        # Limit to 468 to match our database schema
+        if len(face_landmarks) > 468:
+            face_landmarks = face_landmarks[:468]
         
         # Extract name from filename (remove .png extension)
         name = os.path.splitext(image_file)[0]
         
         # Calculate bounding box
-        x_coords = [lm.x * width for lm in face_landmarks.landmark]
-        y_coords = [lm.y * height for lm in face_landmarks.landmark]
+        x_coords = [lm.x * width for lm in face_landmarks]
+        y_coords = [lm.y * height for lm in face_landmarks]
         
         face_x = min(x_coords)
         face_y = min(y_coords)
@@ -113,28 +140,28 @@ def extract_and_store_faces(image_dir='face_data/images'):
         # Extract key landmarks (using MediaPipe face mesh indices)
         # Left eye center (average of left eye landmarks)
         left_eye_indices = [33, 133, 160, 159, 158, 157, 173]
-        left_eye_x = np.mean([face_landmarks.landmark[i].x * width for i in left_eye_indices])
-        left_eye_y = np.mean([face_landmarks.landmark[i].y * height for i in left_eye_indices])
+        left_eye_x = np.mean([face_landmarks[i].x * width for i in left_eye_indices])
+        left_eye_y = np.mean([face_landmarks[i].y * height for i in left_eye_indices])
         
         # Right eye center
         right_eye_indices = [362, 263, 387, 386, 385, 384, 398]
-        right_eye_x = np.mean([face_landmarks.landmark[i].x * width for i in right_eye_indices])
-        right_eye_y = np.mean([face_landmarks.landmark[i].y * height for i in right_eye_indices])
+        right_eye_x = np.mean([face_landmarks[i].x * width for i in right_eye_indices])
+        right_eye_y = np.mean([face_landmarks[i].y * height for i in right_eye_indices])
         
         # Nose tip
-        nose_tip_x = face_landmarks.landmark[1].x * width
-        nose_tip_y = face_landmarks.landmark[1].y * height
+        nose_tip_x = face_landmarks[1].x * width
+        nose_tip_y = face_landmarks[1].y * height
         
         # Mouth center
         mouth_indices = [13, 14, 78, 308]
-        mouth_x = np.mean([face_landmarks.landmark[i].x * width for i in mouth_indices])
-        mouth_y = np.mean([face_landmarks.landmark[i].y * height for i in mouth_indices])
+        mouth_x = np.mean([face_landmarks[i].x * width for i in mouth_indices])
+        mouth_y = np.mean([face_landmarks[i].y * height for i in mouth_indices])
         
         # Ears (approximate)
-        left_ear_x = face_landmarks.landmark[234].x * width
-        left_ear_y = face_landmarks.landmark[234].y * height
-        right_ear_x = face_landmarks.landmark[454].x * width
-        right_ear_y = face_landmarks.landmark[454].y * height
+        left_ear_x = face_landmarks[234].x * width
+        left_ear_y = face_landmarks[234].y * height
+        right_ear_x = face_landmarks[454].x * width
+        right_ear_y = face_landmarks[454].y * height
         
         # Calculate face orientation (simplified)
         eye_distance = np.sqrt((right_eye_x - left_eye_x)**2 + (right_eye_y - left_eye_y)**2)
@@ -157,7 +184,7 @@ def extract_and_store_faces(image_dir='face_data/images'):
         values = [name, image_path, face_x, face_y, face_width, face_height]
         
         # Add all 468 landmarks (x, y, z for each)
-        for i, landmark in enumerate(face_landmarks.landmark):
+        for i, landmark in enumerate(face_landmarks):
             columns.extend([f'landmark_{i}_x', f'landmark_{i}_y', f'landmark_{i}_z'])
             values.extend([landmark.x * width, landmark.y * height, landmark.z])
         
@@ -186,7 +213,7 @@ def extract_and_store_faces(image_dir='face_data/images'):
     
     conn.commit()
     conn.close()
-    face_mesh.close()
+    detector.close()
     print(f"\n✅ Processed {len(image_files)} images and stored in database!")
 
 def view_database():

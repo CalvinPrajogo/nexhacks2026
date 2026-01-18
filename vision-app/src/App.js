@@ -88,8 +88,6 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     
     // Automatically extract facial features and match
     extractFaceFeatures(imageData);
-    
-    downloadImage(imageData, detectionData);
 
     return imageData;
   };
@@ -116,7 +114,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       }
     } catch (error) {
       addLog(`✗ Server error: ${error.message}`);
-      addLog('   Make sure to run: python3 test.py');
+      addLog('   Make sure feature server is running on port 5000');
     }
   };
 
@@ -156,7 +154,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
         apiUrl: "https://cluster1.overshoot.ai/api/v0.2",
         apiKey: "ovs_3ca60448b9246224e080edb3159132a7",
 
-        prompt: SIMPLE_PROMPT, // Use simple prompt for faster processing
+        prompt: SIMPLE_PROMPT, // Complex prompt causes SDK to fail silently
 
         outputSchema: {
             type: "object",
@@ -181,7 +179,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                 console.log('Parsed result:', data);
                 setResult(JSON.stringify(data, null, 2));
                 
-                // Simple check - if person found, capture immediately
+                // Check if person found
                 if (data.personFound) {
                     consecutiveDetections.current++;
                     const count = consecutiveDetections.current;
@@ -194,10 +192,10 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                         setStatus('CONFIRMED! Capturing...');
                         const screenshot = captureScreenshot(data);
                         if (screenshot) {
-                            addLog('Screenshot saved!');
-                            addLog('Stopping video feed...');
+                            addLog('✓ Screenshot captured - processing...');
+                            addLog('✓ Stopping video feed...');
                             visionRef.current.stop();
-                            setStatus('Screenshot captured - Camera stopped');
+                            setStatus('Processing complete - Camera stopped');
                         }
                         consecutiveDetections.current = 0;
                     }
@@ -229,22 +227,14 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     
     vision.start()
       .then(() => {
-        addLog(' vision.start() succeeded');
+        addLog('✓ vision.start() succeeded');
         setStatus('Camera active, waiting for results...');
-        
-        // Log internal state
-        console.log('Vision instance:', visionRef.current);
         
         if (videoRef.current) {
           const stream = vision.getMediaStream();
           addLog(`Got MediaStream: ${stream ? 'YES' : 'NO'}`);
           videoRef.current.srcObject = stream;
         }
-        
-        // Give it time to process
-        setTimeout(() => {
-          addLog('10 seconds elapsed - still waiting for results...');
-        }, 10000);
       })
       .catch(err => {
         addLog(` vision.start() failed: ${err.message}`);

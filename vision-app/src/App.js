@@ -143,6 +143,8 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
 
         source: { type: "camera", cameraFacing: "environment" },
 
+        pollingInterval: 1000, // Process frames every 1 second (1000ms)
+
         debug: true, // Enable SDK debug logging
 
         onResult: (result) => {

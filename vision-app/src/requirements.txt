@@ -1,0 +1,7 @@
+# Face Matching Server with Wood Wide AI
+# Install with: pip install -r requirements.txt
+
+flask>=2.3.0
+flask-cors>=4.0.0
+numpy>=1.24.0
+requests>=2.31.0

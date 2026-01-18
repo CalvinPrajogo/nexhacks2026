@@ -73,71 +73,76 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     addLog(' Initializing RealtimeVision...');
     
     const vision = new RealtimeVision({
-      apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
-      apiKey: 'ovs_3ca60448b9246224e080edb3159132a7',
-      
-      //  START WITH SIMPLE PROMPT
-      prompt: SIMPLE_PROMPT,
-      
-      // Simple schema for testing
-      outputSchema: {
-        type: "object",
-        properties: {
-          personFound: { type: "boolean" },
-          description: { type: "string" }
-        }
-      },
-      
-      source: { type: "camera", cameraFacing: "environment" },
-      
-      processing: {
-        fps: 30,
-        sampling_ratio: 0.3, // Increased to 30% for more frequent checks
-        clip_length_seconds: 1.0,
-        delay_seconds: 1.0
-      },
-      
-      debug: true, // Enable SDK debug logging
-      
-      onResult: (result) => {
-        addLog(' onResult callback fired!');
-        addLog(`Raw result: ${JSON.stringify(result).substring(0, 100)}...`);
-        
-        try {
-          const data = JSON.parse(result.result);
-          addLog(` Parsed: ${JSON.stringify(data)}`);
-          setResult(JSON.stringify(data, null, 2));
-          setStatus(`✓ Result received - Person: ${data.personFound}`);
-          
-          // Simple detection logic for testing
-          if (data.personFound) {
-            consecutiveDetections.current++;
-            const count = consecutiveDetections.current;
-            setStatus(`✓ Person detected ${count}/3 times`);
-            addLog(`✓ Detection ${count}/3`);
+        apiUrl: "https://cluster1.overshoot.ai/api/v0.2",
+        apiKey: "ovs_3ca60448b9246224e080edb3159132a7",
+
+        prompt: PERSON_OF_INTEREST_PROMPT,
+
+        outputSchema: {
+            type: "object",
+            properties: {
+                personDetected: { type: "boolean" },
+                isCentered: { type: "boolean" },
+                isStationary: { type: "boolean" },
+                isEngaged: { type: "boolean" },
+                visibilityQuality: { type: "string" },
+                personOfInterestFound: { type: "boolean" },
+                details: { type: "object" },
+                confidence: { type: "number" },
+                reasoning: { type: "string" }
+            },
+            required: ["personOfInterestFound"]
+        },
+
+        source: { type: "camera", cameraFacing: "environment" },
+
+        debug: true, // Enable SDK debug logging
+
+        onResult: (result) => {
+            addLog("⚡ onResult callback fired!");
             
-            if (count >= 3) {
-              addLog(' PERSON OF INTEREST CONFIRMED!');
-              setStatus(' CONFIRMED! Capturing...');
-              captureScreenshot();
-              consecutiveDetections.current = 0;
+            try {
+                const data = JSON.parse(result.result);
+                console.log('📊 Parsed result:', data);
+                setResult(JSON.stringify(data, null, 2));
+                
+                // Check if person of interest is found
+                if (data.personOfInterestFound) {
+                    consecutiveDetections.current++;
+                    const count = consecutiveDetections.current;
+                    setStatus(`✅ Person of interest detected ${count}/3 times`);
+                    addLog(`✅ Detection ${count}/3 - Confidence: ${data.confidence}`);
+                    
+                    // Require 3 consecutive detections to confirm
+                    if (count >= 3) {
+                        addLog('🎯 PERSON OF INTEREST CONFIRMED!');
+                        setStatus('🎯 CONFIRMED! Capturing...');
+                        const screenshot = captureScreenshot();
+                        if (screenshot) {
+                            addLog('📸 Screenshot saved!');
+                        }
+                        consecutiveDetections.current = 0;
+                    }
+                } else {
+                    // Reset counter if no person detected
+                    if (consecutiveDetections.current > 0) {
+                        addLog(`❌ Detection chain broken (was at ${consecutiveDetections.current})`);
+                    }
+                    consecutiveDetections.current = 0;
+                    setStatus(`🔍 Scanning... ${data.reasoning || 'No person of interest'}`);
+                }
+            } catch (e) {
+                addLog(`❌ Parse error: ${e.message}`);
+                console.error('Parse error:', e, 'Raw:', result.result);
+                setResult(result.result);
             }
-          } else {
-            consecutiveDetections.current = 0;
-            setStatus('Scanning... no person detected');
-          }
-        } catch (e) {
-          addLog(` Parse error: ${e.message}`);
-          addLog(`Raw result that failed: ${result.result}`);
-          console.error('Full error:', e);
-        }
-      },
-      
-      onError: (error) => {
-        addLog(` onError: ${error.message}`);
-        console.error('Full error object:', error);
-        setStatus('Error: ' + error.message);
-      }
+        },
+
+        onError: (error) => {
+            addLog(` onError: ${error.message}`);
+            console.error("Full error object:", error);
+            setStatus("Error: " + error.message);
+        },
     });
 
     visionRef.current = vision;
@@ -149,11 +154,19 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
         addLog(' vision.start() succeeded');
         setStatus('🎥 Camera active, waiting for results...');
         
+        // Log internal state
+        console.log('🔍 Vision instance:', visionRef.current);
+        
         if (videoRef.current) {
           const stream = vision.getMediaStream();
           addLog(`📹 Got MediaStream: ${stream ? 'YES' : 'NO'}`);
           videoRef.current.srcObject = stream;
         }
+        
+        // Give it time to process
+        setTimeout(() => {
+          addLog('⏰ 10 seconds elapsed - still waiting for results...');
+        }, 10000);
       })
       .catch(err => {
         addLog(` vision.start() failed: ${err.message}`);

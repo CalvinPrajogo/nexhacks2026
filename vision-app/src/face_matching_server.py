@@ -25,13 +25,21 @@ from threading import Thread
 import pickle
 
 app = Flask(__name__)
-CORS(app)
+# Enable CORS for React app with explicit configuration
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://localhost:3001"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # Configuration
 WOODWIDE_API_KEY = "sk_KaQdUNVc1ziZAL3CIQL9qu2iGPpBp4w6z51UqUPGmnI"
-DATABASE_DIR = "./face_database"  # Directory containing face feature JSON files
+# Use absolute path to face_database directory
+DATABASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "face_database")
 EMBEDDINGS_CACHE_FILE = "./embeddings_cache.pkl"  # Cache for computed embeddings
-MATCH_THRESHOLD = 0.85  # Euclidean distance threshold for matching
+MATCH_THRESHOLD = 1.5  # Euclidean distance threshold for matching (lower distance = better match)
 
 # Initialize Wood Wide client using official SDK
 woodwide_client = WoodWide(api_key=WOODWIDE_API_KEY)
@@ -386,6 +394,33 @@ def save_embeddings_cache():
         print(f"Error saving cache: {e}")
 
 
+def convert_features_dict_to_array(features):
+    """
+    Convert feature dictionary to flat array matching database format.
+    The database was created using list(features.values()), so we must use the same method
+    to preserve the exact dict iteration order from extract_live_face.py
+    """
+    if isinstance(features, list):
+        # Already an array
+        return features
+    
+    if not isinstance(features, dict):
+        raise ValueError("Features must be a dict or list")
+    
+    # Filter out metadata fields (timestamp, filename, error, etc.)
+    # Only keep numeric feature values
+    feature_array = []
+    for key, value in features.items():
+        # Skip non-numeric metadata fields
+        if key in ['timestamp', 'filename', 'error', 'saved_to', 'success', 'feature_count']:
+            continue
+        # Only include numbers
+        if isinstance(value, (int, float)):
+            feature_array.append(value)
+    
+    return feature_array
+
+
 def find_matching_person_local(input_features: list, threshold: float = MATCH_THRESHOLD) -> dict:
     """
     Find matching person using local Euclidean distance on raw features
@@ -394,12 +429,17 @@ def find_matching_person_local(input_features: list, threshold: float = MATCH_TH
     if not face_database:
         return {"success": False, "error": "Face database is empty", "matched": False}
     
-    input_array = normalize_vector(np.array(input_features, dtype=np.float32))
+    # Convert dict to array if needed
+    feature_array = convert_features_dict_to_array(input_features)
+    input_array = normalize_vector(np.array(feature_array, dtype=np.float32))
+    
+    print(f"[Match] Input features converted to array, length: {len(feature_array)}")
     
     distances = []
     for name, data in face_database.items():
         db_features = normalize_vector(data['features'])
         distance = euclidean_distance(input_array, db_features)
+        print(f"[Match] Distance to {name}: {distance:.4f}")
         distances.append({
             "name": name,
             "distance": distance,
@@ -409,6 +449,10 @@ def find_matching_person_local(input_features: list, threshold: float = MATCH_TH
     
     distances.sort(key=lambda x: x['distance'])
     best_match = distances[0] if distances else None
+    if best_match:
+        print(f"[Match] Best match: {best_match['name']} with distance {best_match['distance']:.4f}, threshold: {threshold}")
+    else:
+        print(f"[Match] No matches found, threshold: {threshold}")
     
     if best_match and best_match['distance'] < threshold:
         confidence = np.exp(-best_match['distance'])
@@ -873,5 +917,5 @@ if __name__ == '__main__':
     print("  GET  /database-stats      - Get database statistics")
     print("="*70 + "\n")
     
-    # Run without debug to see print statements
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    # Run on port 5002 to avoid conflict with feature_server.py (port 5000)
+    app.run(host='0.0.0.0', port=5002, debug=False)

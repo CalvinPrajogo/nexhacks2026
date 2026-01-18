@@ -6,7 +6,14 @@ from datetime import datetime
 from extract_live_face import extract_face_features
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React app
+# Enable CORS for React app with explicit configuration
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:3000", "http://localhost:3001"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # Directory to store extracted features
 FEATURES_DIR = 'live_captures'
@@ -77,4 +84,4 @@ def get_captures():
 if __name__ == '__main__':
     print('🚀 Starting Face Feature Extraction Server...')
     print(f'📁 Features will be saved to: {os.path.abspath(FEATURES_DIR)}')
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)

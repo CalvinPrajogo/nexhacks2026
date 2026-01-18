@@ -96,7 +96,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     try {
       addLog('🔍 Extracting facial features...');
       
-      const response = await fetch('http://localhost:5000/extract-features', {
+      const response = await fetch('http://localhost:5001/extract-features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageData })
@@ -114,7 +114,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       }
     } catch (error) {
       addLog(`✗ Server error: ${error.message}`);
-      addLog('   Make sure feature server is running on port 5000');
+      addLog('   Make sure feature server is running on port 5001');
     }
   };
 
@@ -122,7 +122,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     try {
       addLog('🎯 Matching face against database...');
       
-      const response = await fetch('http://localhost:5001/match-face', {
+      const response = await fetch('http://localhost:5002/match-face', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ features })
@@ -143,7 +143,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       }
     } catch (error) {
       addLog(`✗ Matching error: ${error.message}`);
-      addLog('   Make sure to run: python3 vision-app/src/face_matching_server.py');
+      addLog('   Make sure to run: python3 vision-app/src/face_matching_server.py (port 5002)');
     }
   };
 
@@ -154,15 +154,22 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
         apiUrl: "https://cluster1.overshoot.ai/api/v0.2",
         apiKey: "ovs_3ca60448b9246224e080edb3159132a7",
 
-        prompt: SIMPLE_PROMPT, // Complex prompt causes SDK to fail silently
+        prompt: PERSON_OF_INTEREST_PROMPT,
 
         outputSchema: {
             type: "object",
             properties: {
-                personFound: { type: "boolean" },
-                description: { type: "string" }
+                personDetected: { type: "boolean" },
+                isCentered: { type: "boolean" },
+                isStationary: { type: "boolean" },
+                isEngaged: { type: "boolean" },
+                visibilityQuality: { type: "string" },
+                personOfInterestFound: { type: "boolean" },
+                details: { type: "object" },
+                confidence: { type: "number" },
+                reasoning: { type: "string" }
             },
-            required: ["personFound"]
+            required: ["personOfInterestFound"]
         },
 
         source: { type: "camera", cameraFacing: "environment" },
@@ -179,16 +186,16 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                 console.log('Parsed result:', data);
                 setResult(JSON.stringify(data, null, 2));
                 
-                // Check if person found
-                if (data.personFound) {
+                // Check if person of interest found
+                if (data.personOfInterestFound) {
                     consecutiveDetections.current++;
                     const count = consecutiveDetections.current;
-                    setStatus(`Person detected ${count}/3 times`);
-                    addLog(`✓ Detection ${count}/3`);
+                    setStatus(`Person of interest detected ${count}/3 times`);
+                    addLog(`✓ Detection ${count}/3 - Confidence: ${data.confidence}`);
                     
                     // Require 3 consecutive detections to confirm
                     if (count >= 3) {
-                        addLog('✓ PERSON CONFIRMED! Capturing...');
+                        addLog('✓ PERSON OF INTEREST CONFIRMED! Capturing...');
                         setStatus('CONFIRMED! Capturing...');
                         const screenshot = captureScreenshot(data);
                         if (screenshot) {
@@ -205,7 +212,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                         addLog(`Detection chain broken (was at ${consecutiveDetections.current})`);
                     }
                     consecutiveDetections.current = 0;
-                    setStatus(`Scanning... ${data.description || 'No person detected'}`);
+                    setStatus(`Scanning... ${data.reasoning || 'No person of interest'}`);
                 }
             } catch (e) {
                 addLog(`Parse error: ${e.message}`);

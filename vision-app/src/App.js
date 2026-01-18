@@ -169,6 +169,9 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                         const screenshot = captureScreenshot(data);
                         if (screenshot) {
                             addLog('Screenshot saved!');
+                            addLog('Stopping video feed...');
+                            visionRef.current.stop();
+                            setStatus('Screenshot captured - Camera stopped');
                         }
                         consecutiveDetections.current = 0;
                     }

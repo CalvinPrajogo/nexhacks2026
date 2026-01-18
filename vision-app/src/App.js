@@ -9,6 +9,7 @@ function VisionApp() {
   const [result, setResult] = useState('');
   const [status, setStatus] = useState('Initializing...');
   const [debugLog, setDebugLog] = useState([]);
+  const [capturedImages, setCapturedImages]  = useState([]);
 
   // Add to debug log
   const addLog = (message) => {
@@ -51,8 +52,17 @@ Return JSON format:
 }
 
 IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly centered, stationary, engaged, and visible.`;
+  const downloadImage = (imageData, detectionData) => {
+    const link = document.createElement('a');
+    link.href = imageData;
+    link.download = `person-${new Date().getTime()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    addLog(' Image downloaded to computer!');
+  };
 
-  const captureScreenshot = () => {
+  const captureScreenshot = (detectionData) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     
@@ -65,7 +75,19 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     
     const imageData = canvas.toDataURL('image/jpeg', 0.9);
     addLog(' Screenshot captured!');
-    
+
+    const capture = {
+      timestamp: new Date(),
+      image: imageData,
+      detectionData: detectionData,
+      id: Date.now()
+    };
+    setCapturedImages(prev => [...prev, capture]);
+
+    // will send to devscope HERE
+    //sendToDevscope(imageData, detectionData);
+    downloadImage(imageData, detectionData);
+
     return imageData;
   };
 
@@ -99,7 +121,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
         debug: true, // Enable SDK debug logging
 
         onResult: (result) => {
-            addLog("⚡ onResult callback fired!");
+            addLog("onResult callback fired!");
             
             try {
                 const data = JSON.parse(result.result);
@@ -117,7 +139,7 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
                     if (count >= 3) {
                         addLog('PERSON OF INTEREST CONFIRMED!');
                         setStatus('CONFIRMED! Capturing...');
-                        const screenshot = captureScreenshot();
+                        const screenshot = captureScreenshot(data);
                         if (screenshot) {
                             addLog('Screenshot saved!');
                         }
@@ -205,7 +227,20 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       
       <div style={{ marginTop: '20px', whiteSpace: 'pre-wrap', background: '#f0f0f0', padding: '10px' }}>
         <strong>Latest Result:</strong>
-        {result || 'No results yet'}
+        {capturedImages.length > 0 && (
+          <div style={{ marginTop: '20px' }}>
+            <h3>📸 Captured Screenshots ({capturedImages.length})</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {capturedImages.map((capture) => (
+                <div key={capture.id} style={{ border: '2px solid green', padding: '10px' }}>
+                  <img src={capture.image} alt="Captured" style={{ width: '200px' }} />
+                  <p style={{ fontSize: '12px' }}>{capture.timestamp.toLocaleTimeString()}</p>
+                  <p style={{ fontSize: '11px' }}>{capture.detectionData?.details?.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

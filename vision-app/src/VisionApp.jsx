@@ -133,7 +133,7 @@ function VisionApp() {
     const vision = new RealtimeVision({
       apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
       apiKey: 'ovs_3ca60448b9246224e080edb3159132a7',
-      prompt: 'Read any visible text',
+      prompt: 'Read any visiso ble text',
       source: { type: "camera", cameraFacing: "environment" },
       onResult: (result) => {
         setResult(result.result);
@@ -162,13 +162,13 @@ function VisionApp() {
       {/* Control buttons */}
       <div style={{ padding: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         <button onClick={runPipeline} disabled={isProcessing}>
-          🌳 Train Wood Wide AI ({modelStatus})
+          Train Wood Wide AI ({modelStatus})
         </button>
         <button onClick={checkStatus}>
-          📊 Check Status
+          Check Status
         </button>
         <button onClick={captureAndIdentify} disabled={isProcessing || modelStatus !== 'COMPLETE'}>
-          📸 Capture & Identify
+          Capture & Identify
         </button>
       </div>
 
@@ -182,13 +182,13 @@ function VisionApp() {
         }}>
           {matchResult.matched ? (
             <>
-              <h3>✅ Match Found!</h3>
+              <h3>Match Found!</h3>
               <p><strong>Name:</strong> {matchResult.person_name}</p>
               <p><strong>Confidence:</strong> {(matchResult.confidence * 100).toFixed(1)}%</p>
               <p><strong>Distance:</strong> {matchResult.distance?.toFixed(4)}</p>
             </>
           ) : (
-            <h3>❌ No Match Found</h3>
+            <h3>No Match Found</h3>
           )}
         </div>
       )}

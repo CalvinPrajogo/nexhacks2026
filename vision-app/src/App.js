@@ -105,13 +105,13 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
       const result = await response.json();
       
       if (result.success) {
-        addLog(`✅ Features extracted! Saved to: ${result.saved_to}`);
+        addLog(`Features extracted! Saved to: ${result.saved_to}`);
         addLog(`   Total features: ${result.feature_count}`);
       } else {
-        addLog(`❌ Feature extraction failed: ${result.error}`);
+        addLog(`Feature extraction failed: ${result.error}`);
       }
     } catch (error) {
-      addLog(`⚠️ Server error: ${error.message}`);
+      addLog(`Server error: ${error.message}`);
       addLog('   Make sure to run: python3 feature_server.py');
     }
   };

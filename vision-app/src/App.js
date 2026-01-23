@@ -107,6 +107,8 @@ function VisionApp() {
   const [researchStage, setResearchStage] = useState('');
   const [videoVisible, setVideoVisible] = useState(true);
   const [isResearching, setIsResearching] = useState(false);
+  const [matchedProfile, setMatchedProfile] = useState(null);
+  const [matchedPersonName, setMatchedPersonName] = useState(null);
 
   const PERSON_OF_INTEREST_PROMPT = `You are a person-of-interest detection system. Your goal is to identify when someone is intentionally positioning themselves in front of the camera.
 
@@ -140,6 +142,146 @@ Return JSON format:
 
 IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly centered, stationary, engaged, and visible.`;
 
+  const extractAndMatchFace = async (imageData) => {
+    try {
+      console.log('[App] Extracting facial features from screenshot...');
+      
+      // Call the face feature extraction endpoint
+      const extractResponse = await fetch('http://localhost:5003/extract-features', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageData
+        })
+      });
+
+      if (!extractResponse.ok) {
+        throw new Error(`Failed to extract features: ${extractResponse.status}`);
+      }
+
+      const extractData = await extractResponse.json();
+      
+      if (!extractData.success) {
+        throw new Error(extractData.error || 'Failed to extract features');
+      }
+
+      const features = extractData.features;
+      console.log('[App] Features extracted, attempting match...');
+
+      // Call the face matching endpoint
+      const matchResponse = await fetch('http://localhost:5003/match-face', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          features: features,
+          threshold: 1.0
+        })
+      });
+
+      if (!matchResponse.ok) {
+        throw new Error(`Failed to match face: ${matchResponse.status}`);
+      }
+
+      const matchData = await matchResponse.json();
+
+      if (!matchData.success) {
+        throw new Error(matchData.error || 'Failed to match face');
+      }
+
+      let personName = 'Unknown';
+
+      if (matchData.matched) {
+      personName = matchData.person_name;
+      console.log(`[App] ✓ Match found: ${personName}, confidence: ${matchData.confidence}`);
+    } else {
+      const topMatches = matchData.top_matches || [];
+      if (topMatches.length > 0) {
+        const bestMatch = topMatches[0];
+        personName = bestMatch.name;
+        console.log(`[App] ⚠ Best match: ${personName}, distance: ${bestMatch.distance}`);
+      }
+    }
+
+      // Load profile BEFORE returning
+      const profile = await loadPersonProfile(personName);
+      
+      // Set both in one batch to avoid race conditions
+      setMatchedPersonName(personName);
+      setMatchedProfile(profile);
+      
+      return { success: true, personName, profile };
+
+    } catch (error) {
+      console.error('[App] Face matching error:', error);
+      setMatchedPersonName('Error');
+      setMatchedProfile(null);
+      return { success: false, personName: 'Error', profile: null };
+    }
+  };
+
+
+  // Then update your flow:
+  setTimeout(async () => {
+    const result = await extractAndMatchFace(imageData);
+    await startDeepResearch(result.personName);
+  }, 500);
+
+  const startDeepResearch = async (detectedName) => {
+    setIsResearching(true);
+    
+    const stages = [
+      'Extracting facial features',
+      'Matching against database',
+      `Match found: ${detectedName}`,  // Now this will work!
+      'Initiating deep research protocol',
+      'Scanning social media profiles',
+      'Analyzing professional networks',
+      'Aggregating public records',
+      'Compiling comprehensive profile'
+    ];
+
+    for (let i = 0; i < stages.length; i++) {
+      setResearchStage(stages[i]);
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+
+    setIsResearching(false);
+    setShowProfile(true);
+  };
+
+
+  const loadPersonProfile = async (personName) => {
+    // This would ideally load from a backend, but for now use hardcoded profiles
+    const profiles = {
+      'eden_brunner': BRINLY_PROFILE, // Using Brinly's profile as example
+      'brinly_richards': BRINLY_PROFILE,
+      'calvin_prajogo': {
+        name: 'Calvin Prajogo',
+        image: '/calvin_prajogo.png',
+        education: [
+          {
+            institution: 'University Name',
+            major: 'Computer Science',
+            status: 'Student'
+          }
+        ],
+        occupation: [],
+        expertise: ['Software Development', 'AI'],
+        projects: [],
+        skills: ['Programming', 'Problem Solving'],
+        friends: [],
+        family: [],
+        affiliations: []
+      }
+    };
+
+    return profiles[personName.toLowerCase().replace(/\s+/g, '_')] || profiles['eden_brunner'];
+  };
+
   const captureScreenshot = (detectionData) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -161,9 +303,10 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
     };
     setCapturedImages(prev => [...prev, capture]);
 
-    // Fade out video and start research
+    // Fade out video and start research with face matching
     setVideoVisible(false);
-    setTimeout(() => {
+    setTimeout(async () => {
+      await extractAndMatchFace(imageData);
       startDeepResearch();
     }, 500);
 
@@ -172,16 +315,17 @@ IMPORTANT: Set "personOfInterestFound" to TRUE only when someone is clearly cent
 
   const startDeepResearch = async () => {
     setIsResearching(true);
-    const stages = [
-      'Extracting facial features',
-      'Matching against database',
-      'Match found: Brinly Richards',
-      'Initiating deep research protocol',
-      'Scanning social media profiles',
-      'Analyzing professional networks',
-      'Aggregating public records',
-      'Compiling comprehensive profile'
-    ];
+    // Build stages AFTER we know the matched person
+  const stages = [
+    'Extracting facial features',
+    'Matching against database',
+    matchSuccess ? `Match found: ${matchedPersonName}` : 'No match found - using best guess',
+    'Initiating deep research protocol',
+    'Scanning social media profiles',
+    'Analyzing professional networks',
+    'Aggregating public records',
+    'Compiling comprehensive profile'
+  ];
 
     for (let i = 0; i < stages.length; i++) {
       setResearchStage(stages[i]);

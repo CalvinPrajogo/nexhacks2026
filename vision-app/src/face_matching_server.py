@@ -39,7 +39,7 @@ WOODWIDE_API_KEY = "sk_KaQdUNVc1ziZAL3CIQL9qu2iGPpBp4w6z51UqUPGmnI"
 # Use absolute path to face_database directory
 DATABASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "face_database")
 EMBEDDINGS_CACHE_FILE = "./embeddings_cache.pkl"  # Cache for computed embeddings
-MATCH_THRESHOLD = 1.5  # Euclidean distance threshold for matching (lower distance = better match)
+MATCH_THRESHOLD = 0.5  # Euclidean distance threshold for matching (lower distance = better match)
 
 # Initialize Wood Wide client using official SDK
 woodwide_client = WoodWide(api_key=WOODWIDE_API_KEY)
@@ -421,24 +421,89 @@ def convert_features_dict_to_array(features):
     return feature_array
 
 
+# def find_matching_person_local(input_features: list, threshold: float = MATCH_THRESHOLD) -> dict:
+#     """
+#     Find matching person using local Euclidean distance on raw features
+#     (Fallback when Wood Wide AI is not available)
+#     """
+#     if not face_database:
+#         return {"success": False, "error": "Face database is empty", "matched": False}
+    
+#     # Convert dict to array if needed
+#     feature_array = convert_features_dict_to_array(input_features)
+#     input_array = np.array(feature_array, dtype=np.float32)
+    
+#     print(f"[Match] Input features converted to array, length: {len(feature_array)}")
+    
+#     distances = []
+#     for name, data in face_database.items():
+#         db_features = data['features']
+
+#         distance = euclidean_distance(input_array, db_features)
+#         print(f"[Match] Distance to {name}: {distance:.4f}")
+#         distances.append({
+#             "name": name,
+#             "distance": distance,
+#             "image_path": data.get('image_path', ''),
+#             "metadata": data.get('metadata', {})
+#         })
+    
+#     distances.sort(key=lambda x: x['distance'])
+#     best_match = distances[0] if distances else None
+#     if best_match:
+#         print(f"[Match] Best match: {best_match['name']} with distance {best_match['distance']:.4f}, threshold: {threshold}")
+#     else:
+#         print(f"[Match] No matches found, threshold: {threshold}")
+    
+#     if best_match and best_match['distance'] < threshold:
+#         if len(distances) > 1:
+#             second_best = distances[1]['distance']
+#             if best_match['distance'] > second_best * 0.7:
+#                 return{"matched": False, "message": "Ambiguous match"}
+#         confidence = np.exp(-best_match['distance'])
+#         return {
+#             "success": True,
+#             "matched": True,
+#             "person_name": best_match['name'],
+#             "confidence": float(confidence),
+#             "distance": best_match['distance'],
+#             "image_path": best_match['image_path'],
+#             "metadata": best_match['metadata'],
+#             "top_matches": distances[:5],
+#             "method": "local_euclidean"
+#         }
+#     else:
+#         return {
+#             "success": True,
+#             "matched": False,
+#             "message": "No match found within threshold",
+#             "best_distance": best_match['distance'] if best_match else None,
+#             "threshold": threshold,
+#             "top_matches": distances[:5],
+#             "method": "local_euclidean"
+#         }
+
 def find_matching_person_local(input_features: list, threshold: float = MATCH_THRESHOLD) -> dict:
     """
     Find matching person using local Euclidean distance on raw features
-    (Fallback when Wood Wide AI is not available)
     """
     if not face_database:
         return {"success": False, "error": "Face database is empty", "matched": False}
     
     # Convert dict to array if needed
     feature_array = convert_features_dict_to_array(input_features)
-    input_array = normalize_vector(np.array(feature_array, dtype=np.float32))
+    input_array = np.array(feature_array, dtype=np.float32)  # Remove normalization
     
-    print(f"[Match] Input features converted to array, length: {len(feature_array)}")
+    print(f"[Match] Input features length: {len(feature_array)}")
     
     distances = []
     for name, data in face_database.items():
-        db_features = normalize_vector(data['features'])
-        distance = euclidean_distance(input_array, db_features)
+        db_features = data['features']  # Don't normalize
+        
+        # Make sure dimensions match
+        min_len = min(len(input_array), len(db_features))
+        distance = euclidean_distance(input_array[:min_len], db_features[:min_len])
+        
         print(f"[Match] Distance to {name}: {distance:.4f}")
         distances.append({
             "name": name,
@@ -448,35 +513,15 @@ def find_matching_person_local(input_features: list, threshold: float = MATCH_TH
         })
     
     distances.sort(key=lambda x: x['distance'])
-    best_match = distances[0] if distances else None
-    if best_match:
-        print(f"[Match] Best match: {best_match['name']} with distance {best_match['distance']:.4f}, threshold: {threshold}")
-    else:
-        print(f"[Match] No matches found, threshold: {threshold}")
     
-    if best_match and best_match['distance'] < threshold:
-        confidence = np.exp(-best_match['distance'])
-        return {
-            "success": True,
-            "matched": True,
-            "person_name": best_match['name'],
-            "confidence": float(confidence),
-            "distance": best_match['distance'],
-            "image_path": best_match['image_path'],
-            "metadata": best_match['metadata'],
-            "top_matches": distances[:5],
-            "method": "local_euclidean"
-        }
-    else:
-        return {
-            "success": True,
-            "matched": False,
-            "message": "No match found within threshold",
-            "best_distance": best_match['distance'] if best_match else None,
-            "threshold": threshold,
-            "top_matches": distances[:5],
-            "method": "local_euclidean"
-        }
+    # Return all matches with their distances so you can see what's happening
+    return {
+        "success": True,
+        "matched": distances[0]['distance'] < threshold if distances else False,
+        "person_name": distances[0]['name'] if distances and distances[0]['distance'] < threshold else None,
+        "all_distances": distances,  # See ALL distances
+        "threshold": threshold
+    }
 
 
 def find_matching_person_woodwide(input_features: list, threshold: float = MATCH_THRESHOLD) -> dict:
